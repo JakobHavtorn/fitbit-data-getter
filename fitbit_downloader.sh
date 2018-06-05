@@ -8,10 +8,11 @@ D1="2018-06-04"   # Exclusive
 # Data folders
 DATA_FOLDER="data"            # Folder to place downloaded data into
 OLD_DATA_FOLDER="data-old"    # Folder into which data already in $DATA_FOLDER is moved before starting download
-BACKUP_FOLDER="backup"        # Folder into which $DATA_FOLDER is copied after download has finished
+BACKUP_FOLDER="backup"        # Folder into which $DATA_FOLDER is copied after download has finished.
+                              # New runs don't overwrite this until they are succesfully completed.
 
 # Daily activities
-declare -a DAILY_ACTIVITIES=(
+declare -a DAY_ACTIVITIES=(
   calories
   caloriesBMR
   steps
@@ -26,7 +27,7 @@ declare -a DAILY_ACTIVITIES=(
 )
 
 # Intra-day activities
-declare -a INTRA_ACTIVITIES=(
+declare -a INTRADAY_ACTIVITIES=(
   heart
   calories
   steps
@@ -119,15 +120,15 @@ get_date () {
 get_intraday_range() {
   D0_ITER=$D0
   while [[ $D0_ITER != $D1 ]]; do
-    echo -n "$D0_ITER | "
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$1/date/$D0_ITER/1d/1min/time/00:00/23:59.json >> $DATA_FOLDER/$1-intra-daily.json
-    sed -i -e '$a\' $DATA_FOLDER/$1-intra-daily.json
+    OUT="${DATA_FOLDER}/intraday/${1}/${D0_ITER}.json"
+    echo -n "${OUT} | "
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/${1}/date/${D0_ITER}/1d/1min/time/00:00/23:59.json > ${OUT}
     # Pause
-    maybe_pause $DATA_FOLDER/$1-intra-daily.json
+    maybe_pause ${OUT}
     # Check if execution was pause: If it was, then retry last request
-    if [[ $WAS_PAUSED == 0 ]]
+    if [[ ${WAS_PAUSED} == 0 ]]
     then
-      D0_ITER=$(get_date "$D0_ITER + 1 day")
+      D0_ITER=$(get_date "${D0_ITER} + 1 day")
     fi
   done
 }
@@ -136,7 +137,7 @@ get_intraday_range() {
 get_intradays() {
   echo "========== INTRA-DAY =========="
   echo ""
-  for activity in "${INTRA_ACTIVITIES[@]}"
+  for activity in "${INTRADAY_ACTIVITIES[@]}"
   do
     echo "$activity" | awk '{print toupper($0)}'
     get_intraday_range $activity
@@ -151,28 +152,27 @@ get_intradays() {
 get_dailys() {
   echo "========== DAILIES =========="
   echo ""
-  for activity in "${DAILY_ACTIVITIES[@]}"
+  for activity in "${DAY_ACTIVITIES[@]}"
   do
     echo "$activity" | awk '{print toupper($0)}'
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json >> $DATA_FOLDER/$activity-daily.json
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json > $DATA_FOLDER/day/$activity.json
     echo ""
     # Pause
-    maybe_pause $DATA_FOLDER/$1-intra-daily.json
+    maybe_pause $DATA_FOLDER/$1-intraday.json
     # Check if execution was pause: If it was, then retry last request
     if [[ $WAS_PAUSED == 1 ]]
     then
-      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json >> $DATA_FOLDER/$activity-daily.json
+      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json > $DATA_FOLDER/day/$activity.json
     fi
-    sed -i -e '$a\' $DATA_FOLDER/$activity-daily.json
   done
   echo "SLEEP"
-  curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json >> $DATA_FOLDER/sleep-daily.json
+  curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > $DATA_FOLDER/day/sleep.json
   # Pause
-  maybe_pause $DATA_FOLDER/$1-intra-daily.json
+  maybe_pause $DATA_FOLDER/$1-intraday.json
   # Check if execution was pause: If it was, then retry last request
   if [[ $WAS_PAUSED == 1 ]]
   then
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json >> $DATA_FOLDER/sleep-daily.json
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > $DATA_FOLDER/day/sleep.json
   fi
   echo ""
   echo ""
@@ -191,40 +191,62 @@ get_profile() {
   fi
 }
 
+# Method that creates the directories, DATA_FOLDER, OLD_DATA_FOLDER and BACKUP_FOLDER
+make_dirs() {
+  # Intra daily data directories (subfolder for each directory)
+  for activity in "${INTRADAY_ACTIVITIES[@]}"
+  do
+    if [[ ! -d $DATA_FOLDER/intraday/$activity ]]
+    then
+      mkdir -p -v $DATA_FOLDER/intraday/$activity
+    fi
+  done
+  # Daily directory
+  if [[ ! -d $DATA_FOLDER/day ]]
+  then
+    mkdir -p -v $DATA_FOLDER/day
+  fi
+  # Old data directory
+  if [[ ! -d $OLD_DATA_FOLDER ]]
+  then
+    mkdir -p -v $OLD_DATA_FOLDER
+  fi
+  # Folder for backup of newly downloaded data
+  if [[ ! -d $BACKUP_FOLDER ]]
+  then
+    mkdir -p -v $BACKUP_FOLDER
+  fi
+}
+
+# Method to copy data folder to another folder given as input
+copy_data () {
+  echo "Create copy of data in ./$DATA_FOLDER"
+  cp -r -v ./$DATA_FOLDER/ ./$1
+  echo ""
+}
+
 # Authorization token
 source authorization.token
 
-# Make directory for new data (if not exists)
-if [[ ! -d $DATA_FOLDER ]]
-then
-  mkdir -p -v $DATA_FOLDER
-fi
-# Make directory for old data (if not exists)
-if [[ ! -d $OLD_DATA_FOLDER ]]
-then
-  mkdir -p -v $OLD_DATA_FOLDER
-fi
-# Copy old data to old data folder
-echo "Create copy of already downloaded data in ./$DATA_FOLDER"
-cp -r -v ./$DATA_FOLDER/ ./$OLD_DATA_FOLDER
-echo ""
+# Make directories
+make_dirs
+
+# Make copy of previously downloaded data
+copy_data $OLD_DATA_FOLDER
 
 # Define special methods
 define_aliases
+
 # Get profile
-get_profile
+# get_profile
+
 # Get statistics
 get_intradays
 get_dailys
 
-# Create backup of newly downloaded data
-if [[ ! -d $BACKUP_FOLDER ]]
-then
-  mkdir -p -v $BACKUP_FOLDER
-fi
-echo "Create a backup of the newly downloaded data"
-cp -r -v ./$DATA_FOLDER/ ./$BACKUP_FOLDER
-echo ""
+# Copy to backup
+copy_data $BACKUP_FOLDER
+echo "Done"
 
 # Steps [daily],
 # echo "========== DAILY ACTIVITIES =========="
