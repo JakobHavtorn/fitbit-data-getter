@@ -144,8 +144,8 @@ declare -a DAILY_ACTIVITIES=(
 
 # Intra-day activities
 declare -a INTRA_ACTIVITIES=(
-  # heart
-  # calories
+  heart
+  calories
   steps
   distance
   floors
