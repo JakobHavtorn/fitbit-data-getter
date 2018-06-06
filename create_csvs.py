@@ -61,42 +61,40 @@ def write_dict_to_csv(csv_file, csv_column_names, list_of_dicts, mode='a', write
     return
 
 
-def get_csv_column(activity):
-    """
-    List of units
-        ENTITY              UNIT
-        duration	        milliseconds
-        distance	        kilometers
-        elevation	        meters
-        height	            centimeters
-        weight	            kilograms
-        body measurements   centimeters
-        liquids	            milliliters
-        blood glucose	    millimoles per liter (mmol/dl) (molar concentration)
-    """
-    if activity == 'heart':
-        col = 'Heart rate [bpm]'
-    elif activity == 'calories':
-        col = 'Calories [cal]'
-    elif activity == 'steps':
-        col = 'Steps [#]'
-    elif activity == 'distance':
-        col = 'Distance [km]'
-    elif activity == 'floor':
-        col = 'Floors [#]'
-    elif activity == 'elevation':
-        col = 'Elevation [m]'
-    else:
-        raise ValueError("Unknown activity {}".format(activity))
-    return col
+# def get_csv_column(activity):
+#     """
+#     List of units
+#         ENTITY              UNIT
+#         duration	        milliseconds
+#         distance	        kilometers
+#         elevation	        meters
+#         height	            centimeters
+#         weight	            kilograms
+#         body measurements   centimeters
+#         liquids	            milliliters
+#         blood glucose	    millimoles per liter (mmol/dl) (molar concentration)
+#     """
+#     if activity == 'heart':
+#         col = 'Heart rate [bpm]'
+#     elif activity == 'calories':
+#         col = 'Calories [cal]'
+#     elif activity == 'steps':
+#         col = 'Steps [#]'
+#     elif activity == 'distance':
+#         col = 'Distance [km]'
+#     elif activity == 'floor':
+#         col = 'Floors [#]'
+#     elif activity == 'elevation':
+#         col = 'Elevation [m]'
+#     else:
+#         raise ValueError("Unknown activity {}".format(activity))
+#     return col
 
 
-def create_intraday_csvs(intra_data_dir=None, intra_activities=None):
+def create_intraday_csvs(**kwargs):
     # Data directory and activities
-    intra_data_dir_default = "../data-import/intraday/"
-    intra_activities_default = {"heart", "calories", "steps", "distance", "floors", "elevation"}
-    intra_data_dir = kwargs.pop('intra_data_dir', intra_activities_default)
-    intra_activities = kwargs.pop('intra_data_dir', intra_activities_default)
+    intra_data_dir = kwargs.get('intra_data_dir', INTRADAY_DATA_DIR_DEFAULT)
+    intra_activities = kwargs.get('intra_data_dir', INTRA_ACTIVITIES_DEFAULT)
     # Loop over activities
     for activity in intra_activities:
         activity_dir = os.path.join(intra_data_dir, activity)
@@ -137,12 +135,13 @@ def create_intraday_csvs(intra_data_dir=None, intra_activities=None):
 
 
 def create_resting_heart_csv(**kwargs):
-    day_data_dir_default = "../data-import/day/"
-    day_data_dir = kwargs.get('day_data_dir', day_data_dir_default)
-
+    # Data directory
+    day_data_dir = kwargs.get('day_data_dir', DAY_DATA_DIR_DEFAULT)
+    # Read file
     jf = os.path.join(day_data_dir, 'heart.json')
     data = read_json(jf)
     data = flatten_json(data)
+    # Get data
     dataset = data['activities-heart']
     rhr_dataset = []
     for obs in dataset:
@@ -152,6 +151,7 @@ def create_resting_heart_csv(**kwargs):
             rhr_dataset.append(rhr_obs)
         except:
             pass
+    # Write to .csv
     out_file = os.path.join(day_data_dir, 'restingHeart.csv')
     column_names = list(rhr_obs.keys())
     write_header = True
@@ -161,33 +161,37 @@ def create_resting_heart_csv(**kwargs):
 
 def create_day_csvs(**kwargs):
     # Data directory and activities
-    day_data_dir_default = "../data-import/day/"
-    day_activities_default = {"calories",
-                              "caloriesBMR",
-                              "steps",
-                              "distance",
-                              "floors",
-                              "elevation",
-                              "minutesSedentary",
-                              "minutesLightlyActive",
-                              "minutesFairlyActive",
-                              "minutesVeryActive",
-                              "activityCalories"}
-    day_data_dir = kwargs.get('day_data_dir', day_data_dir_default)
-    day_activities = kwargs.get('day_data_dir', day_activities_default)
+    day_data_dir = kwargs.get('day_data_dir', DAY_DATA_DIR_DEFAULT)
+    day_activities = kwargs.get('day_data_dir', DAY_ACTIVITIES_DEFAULT)
 
     json_files = get_files(day_data_dir)
     for jf in json_files:
         # Read data
         IPython.embed()
-        
         data = read_json(jf)
         data = flatten_json(data)
 
 
+DAY_DATA_DIR_DEFAULT = "data-import/day/"
+DAY_ACTIVITIES_DEFAULT = {"calories",
+                          "caloriesBMR",
+                          "steps",
+                          "distance",
+                          "floors",
+                          "elevation",
+                          "minutesSedentary",
+                          "minutesLightlyActive",
+                          "minutesFairlyActive",
+                          "minutesVeryActive",
+                          "activityCalories"}
+INTRADAY_DATA_DIR_DEFAULT = "data-import/intraday/"
+INTRA_ACTIVITIES_DEFAULT = {"heart",
+                            "calories",
+                            "steps",
+                            "distance",
+                            "floors",
+                            "elevation"}
+
 create_resting_heart_csv()
-IPython.embed()
-create_day_csvs()
-# create_intraday_csvs()
-
-
+create_intraday_csvs()
+# create_day_csvs()
