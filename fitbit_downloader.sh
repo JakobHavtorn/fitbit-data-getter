@@ -1,15 +1,27 @@
+# TODO Fix daily sleep download (max 100 day range)
+
 # Stop on error
 set -e
 
+# ============================================================================ #
+# ============================== INPUT SECTION ============================== #
+# ============================================================================ #
+
 # Start and end dates
 D0="2017-05-06"   # Inclusive
-D1="2018-06-04"   # Exclusive
+D1="2018-06-06"   # Exclusive
+
+# What to get
+GET_DAILY_STATISTICS=true     # This will overwrite already downloaded daily statistics in DATA_FOLDER
+GET_SLEEP_STATISTICS=false    # This will overwrite already downloaded data in the DATA_FOLDER
+GET_INTRADAY_STATISTICS=true  # This creates new files for each day and will correctly add to existing data
 
 # Data folders
 DATA_FOLDER="data"            # Folder to place downloaded data into
-OLD_DATA_FOLDER="data-old"    # Folder into which data already in $DATA_FOLDER is moved before starting download
-BACKUP_FOLDER="backup"        # Folder into which $DATA_FOLDER is copied after download has finished.
+OLD_DATA_FOLDER="data-old"    # Folder into which data already in ${DATA_FOLDER} is moved before starting download
+IMPORT_FOLDER="data-import"   # Folder into which ${DATA_FOLDER} is copied after download has finished.
                               # New runs don't overwrite this until they are succesfully completed.
+                              # This folder is used to create .csv files and for importing to Health
 
 # Daily activities
 declare -a DAY_ACTIVITIES=(
@@ -19,6 +31,7 @@ declare -a DAY_ACTIVITIES=(
   distance
   floors
   elevation
+  heart
   minutesSedentary
   minutesLightlyActive
   minutesFairlyActive
@@ -36,6 +49,11 @@ declare -a INTRADAY_ACTIVITIES=(
   elevation
 )
 
+
+# ============================================================================ #
+# ============================== METHODS SECTION ============================== #
+# ============================================================================ #
+
 # Method to define date and tac commands for MacOS
 define_aliases() {
   if [[ "$OSTYPE" == "darwin"* ]]
@@ -43,29 +61,6 @@ define_aliases() {
     date() { gdate "$@"; }
     tac() { tail -r -- "$@"; }
   fi
-
-  # if [[ "$OSTYPE" == "linux-gnu" ]]
-  # then
-  #   # ...
-  # elif [[ "$OSTYPE" == "darwin"* ]]
-  # then
-  #   # Mac OSX
-  #   alias date='gdate'
-  # elif [[ "$OSTYPE" == "cygwin" ]]
-  # then
-  #   # POSIX compatibility layer and Linux environment emulation for Windows
-  # elif [[ "$OSTYPE" == "msys" ]]
-  # then
-  #   # Lightweight shell and GNU utilities compiled for Windows (part of MinGW)
-  # elif [[ "$OSTYPE" == "win32" ]]
-  # then
-  #   # I'm not sure this can happen.
-  # elif [[ "$OSTYPE" == "freebsd"* ]]
-  # then
-  #   # ...
-  # else
-  #   # Unknown.
-  # fi
 }
 
 # Method for performing a count down for a duration in minutes
@@ -116,18 +111,26 @@ get_date () {
 }
 
 # Helper method that iterates over all days in a range and requests intra-day 
-# statistics for the input activity type for each entire day
+# statistics for the input activity type for each entire day.
+# Will not redownload already downloaded days
 get_intraday_range() {
   D0_ITER=$D0
+  # Iterate over days between D0 and D1
   while [[ $D0_ITER != $D1 ]]; do
     OUT="${DATA_FOLDER}/intraday/${1}/${D0_ITER}.json"
-    echo -n "${OUT} | "
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/${1}/date/${D0_ITER}/1d/1min/time/00:00/23:59.json > ${OUT}
-    # Pause
-    maybe_pause ${OUT}
-    # Check if execution was pause: If it was, then retry last request
-    if [[ ${WAS_PAUSED} == 0 ]]
-    then
+    echo -n "${OUT} | "    
+    # Only download if not already downloaded
+    if [ ! -f ${OUT} ]; then
+      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/${1}/date/${D0_ITER}/1d/1min/time/00:00/23:59.json > ${OUT}
+      maybe_pause ${OUT}
+      # Check if execution was pause: If it was, then retry last request since this errors out
+      if [[ ${WAS_PAUSED} == 0 ]]
+      then
+        D0_ITER=$(get_date "${D0_ITER} + 1 day")
+      fi
+    else
+      # File already downloaded, increment to next day
+      echo "Already downlaoded"
       D0_ITER=$(get_date "${D0_ITER} + 1 day")
     fi
   done
@@ -135,95 +138,113 @@ get_intraday_range() {
 
 # Method to download intra-day statistics for a list of activities
 get_intradays() {
+  echo ""
   echo "========== INTRA-DAY =========="
   echo ""
   for activity in "${INTRADAY_ACTIVITIES[@]}"
   do
-    echo "$activity" | awk '{print toupper($0)}'
-    get_intraday_range $activity
+    echo "${activity}" | awk '{print toupper($0)}'
+    get_intraday_range ${activity}
     echo ""
   done
-  echo ""
-  echo ""
 }
 
 # Method to request daily statistics (e.g. total number of steps) 
 # for a list of activities
 get_dailys() {
+  echo ""  
   echo "========== DAILIES =========="
   echo ""
   for activity in "${DAY_ACTIVITIES[@]}"
   do
-    echo "$activity" | awk '{print toupper($0)}'
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json > $DATA_FOLDER/day/$activity.json
-    echo ""
+    OUT="${DATA_FOLDER}/day/${activity}.json"
+    # echo - n "${activity}" | awk '{print toupper($0)}'
+    echo -n "$OUT | "
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/${activity}/date/$D0/$D1.json > ${OUT}
     # Pause
-    maybe_pause $DATA_FOLDER/$1-intraday.json
+    maybe_pause $OUT
     # Check if execution was pause: If it was, then retry last request
     if [[ $WAS_PAUSED == 1 ]]
     then
-      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/$activity/date/$D0/$D1.json > $DATA_FOLDER/day/$activity.json
+      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/${activity}/date/$D0/$D1.json > ${OUT}
     fi
   done
-  echo "SLEEP"
-  curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > $DATA_FOLDER/day/sleep.json
+}
+
+# Method for getting sleep data
+get_sleep() {
+  echo ""  
+  echo "========== SLEEP =========="
+  echo ""
+  curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > ${DATA_FOLDER}/day/sleep.json
   # Pause
-  maybe_pause $DATA_FOLDER/$1-intraday.json
+  maybe_pause ${DATA_FOLDER}/day/sleep.json
   # Check if execution was pause: If it was, then retry last request
   if [[ $WAS_PAUSED == 1 ]]
   then
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > $DATA_FOLDER/day/sleep.json
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > ${DATA_FOLDER}/day/sleep.json
   fi
-  echo ""
-  echo ""
 }
 
 # Method to get user profile
 get_profile() {
+  echo ""
   echo "========== PROFILE =========="
   echo ""
-  curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/profile.json > $DATA_FOLDER/profile.json
-  maybe_pause $DATA_FOLDER/profile.json
-  echo ""
+  curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/profile.json > ${DATA_FOLDER}/profile.json
+  maybe_pause ${DATA_FOLDER}/profile.json
   if [[ $WAS_PAUSED == 1 ]]
   then
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/profile.json > $DATA_FOLDER/profile.json
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/profile.json > ${DATA_FOLDER}/profile.json
   fi
 }
 
-# Method that creates the directories, DATA_FOLDER, OLD_DATA_FOLDER and BACKUP_FOLDER
+# Method that creates the directories, DATA_FOLDER, OLD_DATA_FOLDER and IMPORT_FOLDER
 make_dirs() {
   # Intra daily data directories (subfolder for each directory)
   for activity in "${INTRADAY_ACTIVITIES[@]}"
   do
-    if [[ ! -d $DATA_FOLDER/intraday/$activity ]]
+    if [[ ! -d ${DATA_FOLDER}/intraday/${activity} ]]
     then
-      mkdir -p -v $DATA_FOLDER/intraday/$activity
+      mkdir -p -v ${DATA_FOLDER}/intraday/${activity}
     fi
   done
-  # Daily directory
-  if [[ ! -d $DATA_FOLDER/day ]]
+  # Daily directory (only if not exists)
+  if [[ ! -d ${DATA_FOLDER}/day ]]
   then
-    mkdir -p -v $DATA_FOLDER/day
+    mkdir -p -v ${DATA_FOLDER}/day
   fi
-  # Old data directory
-  if [[ ! -d $OLD_DATA_FOLDER ]]
-  then
-    mkdir -p -v $OLD_DATA_FOLDER
-  fi
-  # Folder for backup of newly downloaded data
-  if [[ ! -d $BACKUP_FOLDER ]]
-  then
-    mkdir -p -v $BACKUP_FOLDER
-  fi
+  # Old data directory (overwrite previous)
+  rm -r $OLD_DATA_FOLDER
+  mkdir -p -v $OLD_DATA_FOLDER
 }
 
 # Method to copy data folder to another folder given as input
 copy_data () {
-  echo "Create copy of data in ./$DATA_FOLDER"
-  cp -r -v ./$DATA_FOLDER/ ./$1
   echo ""
+  echo "Creating copy of ./${DATA_FOLDER} in ./${1}..."
+  cp -r ./${DATA_FOLDER}/ ./${1}
 }
+
+# ============================================================================ #
+# ============================== SCRIPT SECTION ============================== #
+# ============================================================================ #
+
+# Start message
+echo ""
+echo "Downloading Fitbit data"
+echo "Start date:           ${D0} (inclusive)"
+echo "End date:             ${D1} (exclusive)"
+echo "Daily statistics:     ${GET_DAILY_STATISTICS}"
+echo "Intraday statistics:  ${GET_INTRADAY_STATISTICS}"
+echo "Sleep statistics:     ${GET_SLEEP_STATISTICS}"
+echo ""
+read -p "Proceed? " -n 1 -r
+echo    # (optional) move to a new line
+if [[ ! $REPLY =~ ^[Yy]$ ]]
+then
+    [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1 # handle exits from shell or function but don't exit interactive shell
+fi
 
 # Authorization token
 source authorization.token
@@ -238,86 +259,30 @@ copy_data $OLD_DATA_FOLDER
 define_aliases
 
 # Get profile
-# get_profile
+get_profile
 
 # Get statistics
-get_intradays
-get_dailys
+if [ "$GET_DAILY_STATISTICS" = true ] ; then
+  get_dailys
+fi
+if [ "$GET_INTRADAY_STATISTICS" = true ] ; then
+  get_intradays
+fi
+if [ "$GET_SLEEP_STATISTICS" = true ] ; then
+  get_sleep
+fi
 
-# Copy to backup
-copy_data $BACKUP_FOLDER
-echo "Done"
+# Copy to data-import
+rm -r $IMPORT_FOLDER
+mkdir -p -v $IMPORT_FOLDER
+copy_data $IMPORT_FOLDER
 
-# Steps [daily],
-# echo "========== DAILY ACTIVITIES =========="
-# echo ""
-# curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/steps/date/$D0/$D1.json > steps-daily.json
-# echo ""
-# echo ""
-# echo "========================================================"
-# echo ""
-# echo ""
+# Create csvs
+echo "Creating .csv files using python..."
+echo ""
+python create_csvs.py
 
-
-# get_intradays "heart"
-# echo ""
-# echo ""
-# echo "========================================================"
-# echo ""
-# echo ""
-
-
-
-# # Loop over dates
-# while [[ $D0 != $D1 ]]; do
-#   D0=$(get_date "$D0 + 1 day")
-#   echo "$D0"
-# done
-
-# echo $AUTH
-
-
-
-
-# Sleep
-# https://api.fitbit.com/1.2/user/[user-id]/sleep/date/[startDate]/[endDate].json
-
-
-
-# Heart rate
-# curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/heart/date/2017-05-12/1d/1min/time/00:00/23:59.json > heartrate-intra-day.json
-# echo "\n\n####################################################\n\n"
-
-
-
-
-# Types of data
-# - Daily summary
-# - Time series (daily)
-# - Time series (intra-day)
-
-
-# # Activity time series
-# https://api.fitbit.com/1/user/-/[resource-path]/date/[base-date]/[end-date].json
-# activities/calories
-# activities/caloriesBMR
-# activities/steps
-# activities/distance
-# activities/floors
-# activities/elevation
-# activities/minutesSedentary
-# activities/minutesLightlyActive
-# activities/minutesFairlyActive
-# activities/minutesVeryActive
-# activities/activityCalories
-
-# # Heart rate
-# curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/heart/date/[date]/1d/[detail-level].json
-
-
-# Resources
-# https://dev.fitbit.com/build/reference/web-api/heart-rate/
-# https://dev.fitbit.com/build/reference/web-api/activity/
-# https://dev.fitbit.com/apps
-# https://annofoneblog.wordpress.com/2017/10/19/your-heart-your-calories-your-sleep-your-data-how-to-extract-your-fitbit-data-and-make-graphs-using-r/
-# https://towardsdatascience.com/collect-your-own-fitbit-data-with-python-ff145fa10873
+# End
+echo ""
+echo "Download ended succesfully"
+return 0
