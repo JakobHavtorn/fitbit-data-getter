@@ -102,3 +102,8 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+archive/
+data/
+data-import/
+data-old/
+data-test/
