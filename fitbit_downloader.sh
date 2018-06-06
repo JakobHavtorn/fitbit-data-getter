@@ -15,6 +15,7 @@ D1="2018-06-06"   # Exclusive
 GET_DAILY_STATISTICS=true     # This will overwrite already downloaded daily statistics in DATA_FOLDER
 GET_SLEEP_STATISTICS=false    # This will overwrite already downloaded data in the DATA_FOLDER
 GET_INTRADAY_STATISTICS=true  # This creates new files for each day and will correctly add to existing data
+CREATE_CSVS=true              # Creates .csv files from .json files using Python (importable in Health)
 
 # Data folders
 DATA_FOLDER="data"            # Folder to place downloaded data into
@@ -278,11 +279,13 @@ mkdir -p -v $IMPORT_FOLDER
 copy_data $IMPORT_FOLDER
 
 # Create csvs
-echo "Creating .csv files using python..."
-echo ""
-python create_csvs.py
+if [ "$CREATE_CSVS" = true ] ; then
+  echo "Creating .csv files using python..."
+  echo ""
+  python create_csvs.py
+fi
 
 # End
 echo ""
 echo "Download ended succesfully"
-return 0
+exit 0
