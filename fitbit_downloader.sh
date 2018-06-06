@@ -287,5 +287,6 @@ fi
 
 # End
 echo ""
+echo ""
 echo "Download ended succesfully"
 exit 0

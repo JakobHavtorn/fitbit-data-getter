@@ -122,7 +122,7 @@ def create_intraday_csvs(**kwargs):
                     time_delta = {observation_unit + 's': observation_interval}
                     end = start + datetime.timedelta(**time_delta)
                     obs['endTime'] = end.strftime('%Y-%m-%d %H:%M:%S')
-            
+
             # Write to csv
             out_file = os.path.join(intra_data_dir, activity + '.csv')
             column_names = list(obs.keys())
