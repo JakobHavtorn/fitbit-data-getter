@@ -9,13 +9,14 @@ set -e
 
 # Start and end dates
 D0="2017-05-06"   # Inclusive
-D1="2018-06-06"   # Exclusive
+D1="2018-06-09"   # Exclusive
 
 # What to get
-GET_DAILY_STATISTICS=true     # This will overwrite already downloaded daily statistics in DATA_FOLDER
-GET_SLEEP_STATISTICS=false    # This will overwrite already downloaded data in the DATA_FOLDER
-GET_INTRADAY_STATISTICS=true  # This creates new files for each day and will correctly add to existing data
-CREATE_CSVS=true              # Creates .csv files from .json files using Python (importable in Health)
+GET_DAILY_STATISTICS=false     # This will overwrite already downloaded daily statistics in DATA_FOLDER
+GET_INTRADAY_STATISTICS=false  # This creates new files for each day and will correctly add to existing data
+GET_SLEEP_STATISTICS=false      # This will overwrite already downloaded data in the DATA_FOLDER
+GET_ACTIVITY_STATISTICS=true   # This will overwrite already downloaded data in the DATA_FOLDER
+CREATE_CSVS=false              # Creates .csv files from .json files using Python (importable in Health)
 
 # Data folders
 DATA_FOLDER="data"            # Folder to place downloaded data into
@@ -114,7 +115,7 @@ get_date () {
 # Helper method that iterates over all days in a range and requests intra-day 
 # statistics for the input activity type for each entire day.
 # Will not redownload already downloaded days
-get_intraday_range() {
+get_intraday_single_activity() {
   D0_ITER=$D0
   # Iterate over days between D0 and D1
   while [[ $D0_ITER != $D1 ]]; do
@@ -145,7 +146,7 @@ get_intradays() {
   for activity in "${INTRADAY_ACTIVITIES[@]}"
   do
     echo "${activity}" | awk '{print toupper($0)}'
-    get_intraday_range ${activity}
+    get_intraday_single_activity ${activity}
     echo ""
   done
 }
@@ -172,19 +173,56 @@ get_dailys() {
   done
 }
 
+
+days_between() {
+  echo "( `date -d $2 +%s` - `date -d $1 +%s`) / (24*3600)" | bc -l
+}
+
+
 # Method for getting sleep data
+# Note that we can only request 100 days of sleep data at a time, so we have to loop
 get_sleep() {
   echo ""  
   echo "========== SLEEP =========="
   echo ""
-  curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > ${DATA_FOLDER}/day/sleep.json
-  # Pause
-  maybe_pause ${DATA_FOLDER}/day/sleep.json
-  # Check if execution was pause: If it was, then retry last request
-  if [[ $WAS_PAUSED == 1 ]]
-  then
-    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$D0/$D1.json > ${DATA_FOLDER}/day/sleep.json
-  fi
+  Di=${D0}
+  Dj=$(get_date "${Di} + 100 day")
+  REM_DAYS=$(days_between ${Di} ${D1})
+  while [[ $REM_DAYS > 0 ]]; do
+    echo "${Di} to ${Dj}"
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$Di/$Dj.json > ${DATA_FOLDER}/day/sleep-${Di}-${Dj}.json
+    # Pause
+    maybe_pause ${DATA_FOLDER}/day/sleep-${Di}-${Dj}.json
+    # Check if execution was pause: If it was, then retry last request
+    if [[ $WAS_PAUSED == 1 ]]
+    then
+      curl -s -i -H "$AUTH" https://api.fitbit.com/1.2/user/-/sleep/date/$Di/$Dj.json > ${DATA_FOLDER}/day/sleep-${Di}-${Dj}.json
+    fi
+    # Next 100 day range (if not REM_DAYS <= 0)
+    Di=$(get_date "${Di} + 100 day")
+    Dj=$(get_date "${Dj} + 100 day")
+    REM_DAYS=$(days_between ${Di} ${D1})
+  done
+}
+
+get_activities() {
+  echo ""  
+  echo "========== ACTIVITIES =========="
+  echo ""
+  Di=${D0}
+  REM_DAYS=$(days_between ${Di} ${D1})
+  while [[ $REM_DAYS > 0 ]]; do
+    Dj=$(get_date "${Di} + 20 day") # 
+    curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/list.json?limit=20&sort=asc&offset=0&afterDate=${Di}T00:00:00.000Z > ${DATA_FOLDER}/day/activities-${Di}-${Dj}.json
+    maybe_pause $OUT
+    # Check if execution was pause: If it was, then retry last request
+    if [[ $WAS_PAUSED == 1 ]]
+    then
+      curl -s -i -H "$AUTH" https://api.fitbit.com/1/user/-/activities/list.json?limit=20&sort=asc&offset=0&afterDate=${Di}T00:00:00.000Z > ${DATA_FOLDER}/day/activities-${Di}-${Dj}.json
+    fi
+    Di=${Dj}
+    REM_DAYS=$(days_between ${Di} ${D1})
+  done
 }
 
 # Method to get user profile
@@ -216,8 +254,8 @@ make_dirs() {
     mkdir -p -v ${DATA_FOLDER}/day
   fi
   # Old data directory (overwrite previous)
-  rm -r $OLD_DATA_FOLDER
-  mkdir -p -v $OLD_DATA_FOLDER
+  # rm -r $OLD_DATA_FOLDER
+  # mkdir -p -v $OLD_DATA_FOLDER
 }
 
 # Method to copy data folder to another folder given as input
@@ -239,8 +277,10 @@ echo "End date:             ${D1} (exclusive)"
 echo "Daily statistics:     ${GET_DAILY_STATISTICS}"
 echo "Intraday statistics:  ${GET_INTRADAY_STATISTICS}"
 echo "Sleep statistics:     ${GET_SLEEP_STATISTICS}"
+echo "Activity statistics:  ${GET_ACTIVITY_STATISTICS}"
+echo "Create CSV files:     ${CREATE_CSVS}"
 echo ""
-read -p "Proceed? " -n 1 -r
+read -p "Proceed? (y/n) " -n 1 -r
 echo    # (optional) move to a new line
 if [[ ! $REPLY =~ ^[Yy]$ ]]
 then
@@ -254,7 +294,7 @@ source authorization.token
 make_dirs
 
 # Make copy of previously downloaded data
-copy_data $OLD_DATA_FOLDER
+# copy_data $OLD_DATA_FOLDER
 
 # Define special methods
 define_aliases
@@ -272,11 +312,14 @@ fi
 if [ "$GET_SLEEP_STATISTICS" = true ] ; then
   get_sleep
 fi
+if [ "$GET_ACTIVITY_STATISTICS" = true ] ; then
+  get_activities
+fi
 
 # Copy to data-import
-rm -r $IMPORT_FOLDER
-mkdir -p -v $IMPORT_FOLDER
-copy_data $IMPORT_FOLDER
+# rm -r $IMPORT_FOLDER
+# mkdir -p -v $IMPORT_FOLDER
+# copy_data $IMPORT_FOLDER
 
 # Create csvs
 if [ "$CREATE_CSVS" = true ] ; then
